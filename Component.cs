@@ -1,338 +1,202 @@
-﻿using System.Collections.Generic;
-using System.Threading.Tasks;
-using System.Timers;
-using AIlimit;
-using BepInEx.Logging;
-using Comfort.Common;
-using dvize.AILimit;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using BepInEx;
 using EFT;
+using EFTApi;
 using UnityEngine;
 
-namespace AILimit
+namespace AiLimit
 {
-    public class AILimitComponent : MonoBehaviour
+    [BepInPlugin("com.dvize.AILimit", "dvize.AILimit", "1.9.0")]
+    public class AiLimitComponent : BaseUnityPlugin
     {
-        internal static float botDistance;
-        private static int botCount;
-        private static GameWorld gameWorld;
-
-        private int frameCounter = 0;
-        private List<botPlayer> disabledBotsLastFrame = new List<botPlayer>();
-
-
-        private static Dictionary<int, PlayerInfo> playerInfoMapping = new Dictionary<int, PlayerInfo>();
-        private static List<botPlayer> botList = new List<botPlayer>();
-
-        private botPlayer bot;
-        private Player player;
-
-        private static BotSpawner botSpawnerClass;
-        protected static ManualLogSource Logger
+        private static readonly Dictionary<string, Func<float>> _maxDistanceConfigTaker = new Dictionary<string, Func<float>>
         {
-            get; private set;
-        }
+            { "factory4_day", () => Settings.factoryDistance.Value },
+            { "factory4_night", () => Settings.factoryDistance.Value },
+            { "bigmap", () => Settings.customsDistance.Value },
+            { "sandbox", () => Settings.groundZeroDistance.Value },
+            { "interchange", () => Settings.interchangeDistance.Value },
+            { "rezervbase", () => Settings.reserveDistance.Value },
+            { "laboratory", () => Settings.laboratoryDistance.Value },
+            { "lighthouse", () => Settings.lighthouseDistance.Value },
+            { "shoreline", () => Settings.shorelineDistance.Value },
+            { "woods", () => Settings.woodsDistance.Value },
+            { "tarkovstreets", () => Settings.tarkovstreetsDistance.Value }
+        };
 
-        public AILimitComponent()
+        private static readonly IComparer<(float distance, Player player)> _comparer = Comparer<(float distance, Player player)>.Create(
+            (x, y) => x.distance.CompareTo(y.distance));
+        private SortedSet<(float distance, Player player)> _sortedPlayers0 = new SortedSet<(float distance, Player player)>(_comparer);
+        private SortedSet<(float distance, Player player)> _sortedPlayers1 = new SortedSet<(float distance, Player player)>(_comparer);
+        private readonly Stopwatch _sw = new Stopwatch();
+        private float _checkTime;
+        private readonly HashSet<Player> _corpPlayers = new HashSet<Player>();
+
+        private void Awake()
         {
-            if (Logger == null)
-            {
-                Logger = BepInEx.Logging.Logger.CreateLogSource(nameof(AILimitComponent));
-            }
-        }
-
-        private void Start()
-        {
-            botSpawnerClass.OnBotCreated += OnPlayerAdded;
-            botSpawnerClass.OnBotRemoved += OnPlayerRemoved;
-
-            SetupBotDistanceForMap();
-
-            //reset static vars to work with new raid
-            playerInfoMapping = new Dictionary<int, PlayerInfo>
-            {
-            };
-
-            botList = new List<botPlayer>
-            {
-            };
-
-            Logger.LogDebug("Setup Bot Distance for Map: " + botDistance);
-        }
-        public static void Enable()
-        {
-            if (Singleton<IBotGame>.Instantiated)
-            {
-                gameWorld = Singleton<GameWorld>.Instance;
-                gameWorld.GetOrAddComponent<AILimitComponent>();
-
-                //botspawner is wrong class. bots being enabled here will limit bots spawned.
-
-                botSpawnerClass = (Singleton<IBotGame>.Instance).BotsController.BotSpawner;
-
-
-                Logger.LogDebug("AILimit Enabled");
-            }
-        }
-        private void OnEnable()
-        {
-            // Map distance changes all handled by the same method
-            ConfigManager.OnFactoryDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("factory", newValue);
-            ConfigManager.OnGroundZeroDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("groundzero", newValue);
-            ConfigManager.OnInterchangeDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("interchange", newValue);
-            ConfigManager.OnLaboratoryDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("laboratory", newValue);
-            ConfigManager.OnLighthouseDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("lighthouse", newValue);
-            ConfigManager.OnReserveDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("reserve", newValue);
-            ConfigManager.OnShorelineDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("shoreline", newValue);
-            ConfigManager.OnWoodsDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("woods", newValue);
-            ConfigManager.OnCustomsDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("customs", newValue);
-            ConfigManager.OnTarkovStreetsDistanceChanged += newValue => SettingsHandler.HandleMapDistanceChange("tarkovstreets", newValue);
-        }
-
-
-        private void SetupBotDistanceForMap()
-        {
-            string location = gameWorld.MainPlayer.Location.ToLower();
-            Logger.LogDebug($"The location detected is: {location}");
-            switch (location)
-            {
-                case "factory4_day":
-                case "factory4_night":
-                    botDistance = AILimitPlugin.factoryDistance.Value;
-                    break;
-                case "bigmap":
-                    botDistance = AILimitPlugin.customsDistance.Value;
-                    break;
-                case "sandbox":
-                    botDistance = AILimitPlugin.groundZeroDistance.Value;
-                    break;
-                case "interchange":
-                    botDistance = AILimitPlugin.interchangeDistance.Value;
-                    break;
-                case "rezervbase":
-                    botDistance = AILimitPlugin.reserveDistance.Value;
-                    break;
-                case "laboratory":
-                    botDistance = AILimitPlugin.laboratoryDistance.Value;
-                    break;
-                case "lighthouse":
-                    botDistance = AILimitPlugin.lighthouseDistance.Value;
-                    break;
-                case "shoreline":
-                    botDistance = AILimitPlugin.shorelineDistance.Value;
-                    break;
-                case "woods":
-                    botDistance = AILimitPlugin.woodsDistance.Value;
-                    break;
-                case "tarkovstreets":
-                    botDistance = AILimitPlugin.tarkovstreetsDistance.Value;
-                    break;
-                default:
-                    botDistance = 200.0f;
-                    break;
-            }
-        }
-
-        private void OnPlayerAdded(BotOwner botOwner)
-        {
-            if (!botOwner.GetPlayer.IsYourPlayer)
-            {
-                player = botOwner.GetPlayer;
-                Logger.LogDebug("In OnPlayerAdded Method: " + player.gameObject.name);
-
-                if (!playerInfoMapping.ContainsKey(player.Id))
-                {
-                    var playerInfo = new PlayerInfo
-                    {
-                        Player = player,
-                        Bot = new botPlayer(player.Id)
-                    };
-
-                    playerInfoMapping.Add(player.Id, playerInfo);
-
-                    // Add bot to the botList immediately
-                    botList.Add(playerInfo.Bot);
-
-                    Logger.LogDebug("Added: " + player.Profile.Info.Settings.Role + " - " + player.Profile.Nickname + " to botList");
-
-                    bot = playerInfo.Bot;
-                    bot.Distance = Vector3.SqrMagnitude(player.Position - gameWorld.MainPlayer.Position);
-
-
-                    if (!bot.timer.Enabled && player.CameraPosition != null)
-                    {
-                        bot.timer.Enabled = true;
-                        bot.timer.Start();
-                    }
-                }
-            }
-        }
-
-        private void OnPlayerRemoved(BotOwner botOwner)
-        {
-            player = botOwner.GetPlayer;
-            if (playerInfoMapping.ContainsKey(player.Id))
-            {
-                var playerInfo = playerInfoMapping[player.Id];
-                if (botList.Contains(playerInfo.Bot))
-                {
-                    botList.Remove(playerInfo.Bot);
-                }
-
-                if (disabledBotsLastFrame.Contains(playerInfo.Bot))
-                {
-                    disabledBotsLastFrame.Remove(playerInfo.Bot);
-                }
-
-                playerInfoMapping.Remove(player.Id);
-            }
+            Settings.Init(Config);
         }
 
         private void Update()
         {
-            if (AILimitPlugin.PluginEnabled.Value)
+            if (!Settings.PluginEnabled.Value || EFTHelpers._GameWorldHelper.GameWorld == null || EFTHelpers._PlayerHelper.Player == null)
             {
-                frameCounter++;
-
-                if (frameCounter >= AILimitPlugin.FramesToCheck.Value)
-                {
-                    UpdateBots();
-                    frameCounter = 0; // Reset the frame counter
-                }
-                else
-                {
-                    UpdateBotsWithDisabledList();
-                }
+                // 不在战局里就不用排序
+                _sortedPlayers0.Clear();
+                _sortedPlayers1.Clear();
+                _corpPlayers.Clear();
+                return;
             }
+            
+            if (Time.time - _checkTime > Settings.CheckInterval.Value)
+            {
+                _checkTime = Time.time;
+                
+                LoadAndSortPlayers();
+            }
+            
+            SetPlayersEnable();
         }
 
-        private void UpdateBots()
+        private void LoadAndSortPlayers()
         {
-            botCount = 0;
-            disabledBotsLastFrame.Clear();
-
-            botList.Sort((a, b) => a.Distance.CompareTo(b.Distance));
-
-            foreach (var bot in botList)
+            _sw.Restart();
+            
+            _sortedPlayers0.Clear();
+            foreach (var player in EFTHelpers._GameWorldHelper.AllOtherPlayer)
             {
-                player = playerInfoMapping[bot.Id].Player;
-
-                if (player == null || !player.HealthController.IsAlive)
+                if (player == null || 
+                    player.gameObject == null || 
+                    !player.HealthController.IsAlive)
                 {
                     continue;
                 }
 
-                bot.Distance = Vector3.SqrMagnitude(player.Position - gameWorld.MainPlayer.Position);
-
-                if (botCount < AILimitPlugin.BotLimit.Value &&
-                    bot.Distance < botDistance * botDistance &&
-                    bot.eligibleNow)
+                // 遍历其他角色的时候顺便找一下队友
+                // 第一次遍历的时候可能不太对，但是遍历完第一次以后就对了
+                // 以及如果这个人是队友的话直接跳过，不隐藏
+                if (IsCorpPlayer(player))
                 {
-                    player.gameObject.SetActive(true);
-                    botCount++;
+                    _corpPlayers.Add(player);
+                    continue;
                 }
-                else if (bot.eligibleNow && !disabledBotsLastFrame.Contains(bot))
-                {
-                    // Clear AI decision queue so they don't do anything when they are disabled.
-                    player.AIData.BotOwner.DecisionQueue.Clear();
-                    player.AIData.BotOwner.Memory.GoalEnemy = null;
-                    player.gameObject.SetActive(false);
-                    disabledBotsLastFrame.Add(bot);
-                }
+                
+                var distance = Vector3.SqrMagnitude(GetCenterPlayer().PlayerBones.BodyTransform.position -
+                                                    player.PlayerBones.BodyTransform.position);
+                _sortedPlayers0.Add((distance, player));
             }
+            
+            (_sortedPlayers0, _sortedPlayers1) = (_sortedPlayers1, _sortedPlayers0);
+            
+            _sw.Stop();
+            
+            Logger.LogDebug($"ailimit 读取和排序角色耗时 {_sw.Elapsed.TotalMilliseconds}");
         }
 
-        private void UpdateBotsWithDisabledList()
+        private void SetPlayersEnable()
         {
-            foreach (var bot in disabledBotsLastFrame)
+            if (_sortedPlayers1.Count == 0)
             {
-                player = playerInfoMapping[bot.Id].Player;
-
-                if (player == null || !player.HealthController.IsAlive)
+                return;
+            }
+            
+            // _sw.Restart();
+            
+            var maxDistance = GetMaxDistance();
+            var botLimit = Settings.BotLimit.Value;
+            
+            var count = 0;
+            foreach (var (distance, player) in _sortedPlayers1)
+            {
+                if (player == null || player.gameObject == null)
                 {
                     continue;
                 }
+                
+                var enable = !player.HealthController.IsAlive || (count < botLimit && distance < maxDistance * maxDistance);
+                SetBotEnabled(player, enable);
+                count++;
+            }
+            
+            // _sw.Stop();
+            
+            // Logger.LogDebug($"ailimit 设置角色隐藏耗时 {_sw.Elapsed.TotalMilliseconds}");
+        }
 
-                if (bot.eligibleNow)
+        private Player GetCenterPlayer()
+        {
+            var yourPlayer = EFTHelpers._PlayerHelper.Player;
+            if (yourPlayer.HealthController.IsAlive)
+            {
+                return yourPlayer;
+            }
+
+            foreach (var p in _corpPlayers)
+            {
+                if (p != null && p.HealthController.IsAlive)
                 {
-                    player.AIData.BotOwner.DecisionQueue.Clear();
-                    player.AIData.BotOwner.Memory.GoalEnemy = null;
-                    player.gameObject.SetActive(false);
+                    return p;
                 }
             }
-        }
 
-        private static async Task<ElapsedEventHandler> EligiblePool(botPlayer botplayer)
+            return yourPlayer;
+        }
+        
+        private static float GetMaxDistance()
         {
-            //async while loop with await until bot actually in game
-            while (playerInfoMapping[botplayer.Id].Player.CameraPosition == null)
+            var location = EFTHelpers._PlayerHelper.Player.Location.ToLower();
+            
+            if (_maxDistanceConfigTaker.TryGetValue(location, out var distance))
             {
-                await Task.Delay(1000);
+                return distance();
             }
 
-            botplayer.timer.Stop();
-            botplayer.eligibleNow = true;
-            Logger.LogDebug("Bot # " + playerInfoMapping[botplayer.Id].Player.gameObject.name + " is now eligible.");
-            return null;
+            return 200;
         }
 
-
-        private void OnDisable()
+        private static void SetBotEnabled(Player player, bool enabled)
         {
-            // Unsubscribe from map distance changes
-            ConfigManager.OnFactoryDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("factory", newValue);
-            ConfigManager.OnGroundZeroDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("groundzero", newValue);
-            ConfigManager.OnInterchangeDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("interchange", newValue);
-            ConfigManager.OnLaboratoryDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("laboratory", newValue);
-            ConfigManager.OnLighthouseDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("lighthouse", newValue);
-            ConfigManager.OnReserveDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("reserve", newValue);
-            ConfigManager.OnShorelineDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("shoreline", newValue);
-            ConfigManager.OnWoodsDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("woods", newValue);
-            ConfigManager.OnCustomsDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("customs", newValue);
-            ConfigManager.OnTarkovStreetsDistanceChanged -= newValue => SettingsHandler.HandleMapDistanceChange("tarkovstreets", newValue);
+            if ((player.gameObject.activeSelf || player.gameObject.activeInHierarchy) && !enabled)
+            {
+                var aiData = player.AIData;
+                if (aiData != null)
+                {
+                    var botOwner = aiData.BotOwner;
+                    if (botOwner != null)
+                    {
+                        botOwner?.DecisionQueue.Clear();
+                        var memory = botOwner.Memory;
+                        if (memory != null)
+                        {
+                            memory.GoalEnemy = null;
+                        }
+                    }
+                }
+                player.gameObject.SetActive(false);
+                player.WeaponRoot?.Original?.gameObject?.SetActive(false);
+            }
+            else if((!player.gameObject.activeSelf || !player.gameObject.activeInHierarchy) && enabled)
+            {
+                player.gameObject.SetActive(true);
+                player.WeaponRoot?.Original?.gameObject?.SetActive(true);
+            }
         }
 
-        private class PlayerInfo
+        private static bool IsCorpPlayer(Player player)
         {
-            public Player Player
+            if (player == EFTHelpers._PlayerHelper.Player)
             {
-                get; set;
+                return false;
             }
-            public botPlayer Bot
+
+            if (player.GroupId == "Fika")
             {
-                get; set;
+                return true;
             }
+
+            return false;
         }
-
-        private class botPlayer
-        {
-            public int Id
-            {
-                get; set;
-            }
-            public float Distance
-            {
-                get; set;
-            }
-            public bool eligibleNow
-            {
-                get; set;
-            }
-            public Timer timer;
-
-            public botPlayer(int newID)
-            {
-                Id = newID;
-                eligibleNow = false;
-
-                timer = new Timer(AILimitPlugin.TimeAfterSpawn.Value * 1000);
-                timer.Enabled = false;
-                timer.AutoReset = false;
-                timer.Elapsed += (sender, e) => EligiblePool(this);
-            }
-        }
-
-
-
-
     }
 }
