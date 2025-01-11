@@ -8,6 +8,7 @@ namespace AiLimit
         public static ConfigEntry<bool> PluginEnabled;
         public static ConfigEntry<int> BotLimit;
         public static ConfigEntry<float> CheckInterval;
+        public static ConfigEntry<bool> EnableDebugLog;
 
         public static ConfigEntry<float> factoryDistance;
         public static ConfigEntry<float> interchangeDistance;
@@ -39,6 +40,12 @@ namespace AiLimit
                 "Check bots time interval",
                 3f,
                 "Time to wait before rechecking bots");
+            
+            EnableDebugLog = config.Bind(
+                "Main Settings",
+                "Enable Debug Log",
+                false,
+                "");
 
             factoryDistance = config.Bind(
                 "Map Related",

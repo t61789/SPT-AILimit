@@ -51,6 +51,9 @@
     <ErrorReport>prompt</ErrorReport>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
+  <PropertyGroup>
+    <PostBuildEvent>copy "$(TargetDir)dvize.AILimit.dll" "E:\Games\EscapeFromTarkov\3.10.4\Client.0.15.5.1.33420\BepInEx\plugins\dvize.AILimit.dll"</PostBuildEvent>
+  </PropertyGroup>
   <ItemGroup>
     <Reference Include="0Harmony">
       <HintPath>F:\Games\EscapeFromTarkov\3.10\Client.0.15.5.1.33420\BepInEx\core\0Harmony.dll</HintPath>
@@ -121,17 +124,4 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <PropertyGroup>
-    <PostBuildEvent>copy "$(TargetPath)" "F:\SPT-AKI-DEV\BepInEx\plugins\$(TargetName).dll"
-
-if "$(ConfigurationName)" == "Debug" (
-    copy "$(TargetDir)$(TargetName).pdb" "F:\SPT-AKI-DEV\BepInEx\plugins\$(TargetName).pdb"
-) else (
-    del "F:\SPT-AKI-DEV\BepInEx\plugins\$(TargetName).pdb"
-)
-
-if "$(ConfigurationName)" == "Release" (
-    powershell -ExecutionPolicy Bypass -NoProfile -NonInteractive -File "$(ProjectDir)PackageMods.ps1" -ConfigurationName "$(ConfigurationName)" -TargetPath "F:\SPT-AKI-DEV\BepInEx\plugins\$(TargetName).dll" -TargetName "$(TargetName)" -TargetDir "F:\SPT-AKI-DEV\BepInEx\plugins"
-)</PostBuildEvent>
-  </PropertyGroup>
 </Project>

@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using BepInEx;
 using EFT;
+using EFT.UI;
 using EFTApi;
 using UnityEngine;
 
@@ -11,6 +13,12 @@ namespace AiLimit
     [BepInPlugin("com.dvize.AILimit", "dvize.AILimit", "1.9.0")]
     public class AiLimitComponent : BaseUnityPlugin
     {
+        private struct SortingPlayer
+        {
+            public float distance;
+            public Player player;
+        }
+        
         private static readonly Dictionary<string, Func<float>> _maxDistanceConfigTaker = new Dictionary<string, Func<float>>
         {
             { "factory4_day", () => Settings.factoryDistance.Value },
@@ -26,13 +34,12 @@ namespace AiLimit
             { "tarkovstreets", () => Settings.tarkovstreetsDistance.Value }
         };
 
-        private static readonly IComparer<(float distance, Player player)> _comparer = Comparer<(float distance, Player player)>.Create(
-            (x, y) => x.distance.CompareTo(y.distance));
-        private SortedSet<(float distance, Player player)> _sortedPlayers0 = new SortedSet<(float distance, Player player)>(_comparer);
-        private SortedSet<(float distance, Player player)> _sortedPlayers1 = new SortedSet<(float distance, Player player)>(_comparer);
-        private readonly Stopwatch _sw = new Stopwatch();
+        private static bool EnableDebugLog => Settings.EnableDebugLog.Value;
+        private static readonly Stopwatch _sw = new Stopwatch();
+        
         private float _checkTime;
         private readonly HashSet<Player> _corpPlayers = new HashSet<Player>();
+        private readonly List<SortingPlayer> _aiPlayers = new List<SortingPlayer>();
 
         private void Awake()
         {
@@ -44,8 +51,6 @@ namespace AiLimit
             if (!Settings.PluginEnabled.Value || EFTHelpers._GameWorldHelper.GameWorld == null || EFTHelpers._PlayerHelper.Player == null)
             {
                 // 不在战局里就不用排序
-                _sortedPlayers0.Clear();
-                _sortedPlayers1.Clear();
                 _corpPlayers.Clear();
                 return;
             }
@@ -54,26 +59,26 @@ namespace AiLimit
             {
                 _checkTime = Time.time;
                 
-                LoadAndSortPlayers();
+                ExecuteWithTiming(LoadAndSortPlayers, "读取和排序角色耗时 {0}ms", EnableDebugLog);
             }
             
-            SetPlayersEnable();
+            ExecuteWithTiming(SetPlayersEnable, "设置角色是否显示耗时 {0}ms", EnableDebugLog);
         }
 
         private void LoadAndSortPlayers()
         {
-            _sw.Restart();
+            _corpPlayers.Clear();
+            _aiPlayers.Clear();
             
-            _sortedPlayers0.Clear();
+            var deadCount = 0;
             foreach (var player in EFTHelpers._GameWorldHelper.AllOtherPlayer)
             {
                 if (player == null || 
-                    player.gameObject == null || 
-                    !player.HealthController.IsAlive)
+                    player.gameObject == null)
                 {
                     continue;
                 }
-
+                
                 // 遍历其他角色的时候顺便找一下队友
                 // 第一次遍历的时候可能不太对，但是遍历完第一次以后就对了
                 // 以及如果这个人是队友的话直接跳过，不隐藏
@@ -82,47 +87,70 @@ namespace AiLimit
                     _corpPlayers.Add(player);
                     continue;
                 }
+
+                if (!player.HealthController.IsAlive)
+                {
+                    // 有时候尸体会被隐藏，不知道为啥，这里显示一下
+                    SetBotEnabled(player, true);
+                    deadCount++;
+                    continue;
+                }
                 
-                var distance = Vector3.SqrMagnitude(GetCenterPlayer().PlayerBones.BodyTransform.position -
+                var centerPlayer = GetCenterPlayer();
+                var distance = Vector3.SqrMagnitude(centerPlayer.PlayerBones.BodyTransform.position -
                                                     player.PlayerBones.BodyTransform.position);
-                _sortedPlayers0.Add((distance, player));
+
+                _aiPlayers.Add(new SortingPlayer
+                {
+                    distance = distance,
+                    player = player
+                });
             }
             
-            (_sortedPlayers0, _sortedPlayers1) = (_sortedPlayers1, _sortedPlayers0);
-            
-            _sw.Stop();
-            
-            Logger.LogDebug($"ailimit 读取和排序角色耗时 {_sw.Elapsed.TotalMilliseconds}");
+            _aiPlayers.Sort((x, y)=>x.distance.CompareTo(y.distance));
+
+            if (EnableDebugLog)
+            {
+                ConsoleScreen.Log($"当前活跃角色 {_aiPlayers.Count} 个，尸体 {deadCount} 个，中心角色 {GetCenterPlayer()?.Profile.GetCorrectedNickname()}");
+            }
         }
 
         private void SetPlayersEnable()
         {
-            if (_sortedPlayers1.Count == 0)
+            if (_aiPlayers.Count == 0)
             {
                 return;
             }
             
-            // _sw.Restart();
-            
-            var maxDistance = GetMaxDistance();
             var botLimit = Settings.BotLimit.Value;
+            var maxDistance = GetMaxDistance();
             
             var count = 0;
-            foreach (var (distance, player) in _sortedPlayers1)
+            foreach (var p in _aiPlayers)
             {
+                var player = p.player;
+                var distance = p.distance;
+                
                 if (player == null || player.gameObject == null)
                 {
                     continue;
                 }
+
+                bool enable;
+
+                if (!player.HealthController.IsAlive)
+                {
+                    enable = true;
+                    // 如果死了就不加入显示计数了，让更远处的角色直接显示出来
+                }
+                else
+                {
+                    enable = count < botLimit && distance < maxDistance * maxDistance;
+                    count++;
+                }
                 
-                var enable = !player.HealthController.IsAlive || (count < botLimit && distance < maxDistance * maxDistance);
                 SetBotEnabled(player, enable);
-                count++;
             }
-            
-            // _sw.Stop();
-            
-            // Logger.LogDebug($"ailimit 设置角色隐藏耗时 {_sw.Elapsed.TotalMilliseconds}");
         }
 
         private Player GetCenterPlayer()
@@ -197,6 +225,22 @@ namespace AiLimit
             }
 
             return false;
+        }
+
+        private void ExecuteWithTiming(Action action, string formatStr, bool needTiming)
+        {
+            if (needTiming)
+            {
+                _sw.Restart();
+            }
+
+            action();
+
+            if (needTiming)
+            {
+                _sw.Stop();
+                ConsoleScreen.Log(string.Format(formatStr, _sw.Elapsed.TotalMilliseconds));
+            }
         }
     }
 }
