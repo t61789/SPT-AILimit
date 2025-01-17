@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -13,12 +14,6 @@ namespace AiLimit
     [BepInPlugin("com.dvize.AILimit", "dvize.AILimit", "1.9.0")]
     public class AiLimitComponent : BaseUnityPlugin
     {
-        private struct SortingPlayer
-        {
-            public float distance;
-            public Player player;
-        }
-        
         private static readonly Dictionary<string, Func<float>> _maxDistanceConfigTaker = new Dictionary<string, Func<float>>
         {
             { "factory4_day", () => Settings.factoryDistance.Value },
@@ -38,8 +33,9 @@ namespace AiLimit
         private static readonly Stopwatch _sw = new Stopwatch();
         
         private float _checkTime;
-        private readonly HashSet<Player> _corpPlayers = new HashSet<Player>();
-        private readonly List<SortingPlayer> _aiPlayers = new List<SortingPlayer>();
+        private readonly HashSet<Player> _centerPlayers = new HashSet<Player>();
+        private SortedList<float, Player> _aiPlayers = new SortedList<float, Player>();
+        private IEnumerator _processing;
 
         private void Awake()
         {
@@ -51,68 +47,92 @@ namespace AiLimit
             if (!Settings.PluginEnabled.Value || EFTHelpers._GameWorldHelper.GameWorld == null || EFTHelpers._PlayerHelper.Player == null)
             {
                 // 不在战局里就不用排序
-                _corpPlayers.Clear();
+                _centerPlayers.Clear();
+                _aiPlayers.Clear();
+                _processing = null;
                 return;
+            }
+
+            SetPlayersEnable();
+
+            if (_processing != null)
+            {
+                if (_processing.MoveNext())
+                {
+                    return;
+                }
+
+                _processing = null;
+                _checkTime = Time.time;
             }
             
             if (Time.time - _checkTime > Settings.CheckInterval.Value)
             {
-                _checkTime = Time.time;
-                
-                ExecuteWithTiming(LoadAndSortPlayers, "读取和排序角色耗时 {0}ms", EnableDebugLog);
+                _processing = LoadAndSortPlayers();
             }
-            
-            ExecuteWithTiming(SetPlayersEnable, "设置角色是否显示耗时 {0}ms", EnableDebugLog);
         }
 
-        private void LoadAndSortPlayers()
+        private IEnumerator LoadAndSortPlayers()
         {
-            _corpPlayers.Clear();
-            _aiPlayers.Clear();
+            UpdateCenterPlayers(_centerPlayers);
+
+            if (_centerPlayers.Count == 0)
+            {
+                // 玩家全死完了就什么也不干
+                yield break;
+            }
             
             var deadCount = 0;
+            var sortingPlayers = new SortedList<float, Player>();
+            
             foreach (var player in EFTHelpers._GameWorldHelper.AllOtherPlayer)
             {
-                if (player == null || 
-                    player.gameObject == null)
+                yield return null;
+                
+                if (player == null)
+                {
+                    continue;
+                }
+
+                // 是中心角色不隐藏
+                if (_centerPlayers.Contains(player) || !player.IsAI)
                 {
                     continue;
                 }
                 
-                // 遍历其他角色的时候顺便找一下队友
-                // 第一次遍历的时候可能不太对，但是遍历完第一次以后就对了
-                // 以及如果这个人是队友的话直接跳过，不隐藏
-                if (IsCorpPlayer(player))
-                {
-                    _corpPlayers.Add(player);
-                    continue;
-                }
-
                 if (!player.HealthController.IsAlive)
                 {
                     // 有时候尸体会被隐藏，不知道为啥，这里显示一下
-                    SetBotEnabled(player, true);
+                    // SetBotEnabled(player, true);
                     deadCount++;
                     continue;
                 }
-                
-                var centerPlayer = GetCenterPlayer();
-                var distance = Vector3.SqrMagnitude(centerPlayer.PlayerBones.BodyTransform.position -
-                                                    player.PlayerBones.BodyTransform.position);
 
-                _aiPlayers.Add(new SortingPlayer
+                // btr射手不隐藏
+                if (player.AIData.BotOwner.IsRole(WildSpawnType.shooterBTR))
                 {
-                    distance = distance,
-                    player = player
-                });
+                    continue;
+                }
+
+                // 还没激活不隐藏
+                if (player.AIData.BotOwner.BotState != EBotState.Active)
+                {
+                    continue;
+                }
+                
+                var distance = GetDistance(player, _centerPlayers);
+
+                sortingPlayers.Add(distance, player);
             }
             
-            _aiPlayers.Sort((x, y)=>x.distance.CompareTo(y.distance));
-
             if (EnableDebugLog)
             {
-                ConsoleScreen.Log($"当前活跃角色 {_aiPlayers.Count} 个，尸体 {deadCount} 个，中心角色 {GetCenterPlayer()?.Profile.GetCorrectedNickname()}");
+                ConsoleScreen.Log($"当前活跃角色 {sortingPlayers.Count} 个，死亡角色 {deadCount} 个， 中心角色 {string.Join(" ", from p in _centerPlayers select p.Profile.GetCorrectedNickname())}");
+                var s = from p in sortingPlayers select $"({p.Value.Profile.GetCorrectedNickname()}, {Mathf.Sqrt(p.Key)}m)";
+                ConsoleScreen.Log($"所有角色最小距离 {string.Join(" ", s)}");
             }
+
+            _aiPlayers = sortingPlayers;
         }
 
         private void SetPlayersEnable()
@@ -126,12 +146,9 @@ namespace AiLimit
             var maxDistance = GetMaxDistance();
             
             var count = 0;
-            foreach (var p in _aiPlayers)
+            foreach (var (distance, player) in _aiPlayers)
             {
-                var player = p.player;
-                var distance = p.distance;
-                
-                if (player == null || player.gameObject == null)
+                if (player == null)
                 {
                     continue;
                 }
@@ -152,25 +169,6 @@ namespace AiLimit
                 SetBotEnabled(player, enable);
             }
         }
-
-        private Player GetCenterPlayer()
-        {
-            var yourPlayer = EFTHelpers._PlayerHelper.Player;
-            if (yourPlayer.HealthController.IsAlive)
-            {
-                return yourPlayer;
-            }
-
-            foreach (var p in _corpPlayers)
-            {
-                if (p != null && p.HealthController.IsAlive)
-                {
-                    return p;
-                }
-            }
-
-            return yourPlayer;
-        }
         
         private static float GetMaxDistance()
         {
@@ -188,27 +186,25 @@ namespace AiLimit
         {
             if ((player.gameObject.activeSelf || player.gameObject.activeInHierarchy) && !enabled)
             {
-                var aiData = player.AIData;
-                if (aiData != null)
-                {
-                    var botOwner = aiData.BotOwner;
-                    if (botOwner != null)
-                    {
-                        botOwner?.DecisionQueue.Clear();
-                        var memory = botOwner.Memory;
-                        if (memory != null)
-                        {
-                            memory.GoalEnemy = null;
-                        }
-                    }
-                }
+                player.AIData.BotOwner.DecisionQueue.Clear();
+                player.AIData.BotOwner.Memory.GoalEnemy = null;
+                player.AIData.BotOwner.PatrollingData.Pause();
+                player.AIData.BotOwner.ShootData.EndShoot();
+                player.AIData.BotOwner.ShootData.CanShootByState = false;
+                player.AIData.BotOwner.StandBy.StandByType = BotStandByType.paused;
+                player.AIData.BotOwner.StandBy.CanDoStandBy = false;
+                player.ActiveHealthController.PauseAllEffects();
                 player.gameObject.SetActive(false);
-                player.WeaponRoot?.Original?.gameObject?.SetActive(false);
             }
             else if((!player.gameObject.activeSelf || !player.gameObject.activeInHierarchy) && enabled)
             {
                 player.gameObject.SetActive(true);
-                player.WeaponRoot?.Original?.gameObject?.SetActive(true);
+                player.AIData.BotOwner.PatrollingData.Unpause();
+                player.AIData.BotOwner.StandBy.Activate();
+                player.AIData.BotOwner.StandBy.CanDoStandBy = true;
+                player.AIData.BotOwner.ShootData.CanShootByState = true;
+                player.AIData.BotOwner.ShootData.BlockFor(1f);
+                player.ActiveHealthController.UnpauseAllEffects();
             }
         }
 
@@ -227,7 +223,7 @@ namespace AiLimit
             return false;
         }
 
-        private void ExecuteWithTiming(Action action, string formatStr, bool needTiming)
+        private static void ExecuteWithProfiling(Action action, string formatStr, bool needTiming)
         {
             if (needTiming)
             {
@@ -241,6 +237,50 @@ namespace AiLimit
                 _sw.Stop();
                 ConsoleScreen.Log(string.Format(formatStr, _sw.Elapsed.TotalMilliseconds));
             }
+        }
+
+        private static void UpdateCenterPlayers(HashSet<Player> centerPlayers)
+        {
+            centerPlayers.Clear();
+            
+            TryAddToSet(EFTHelpers._PlayerHelper.Player);
+            foreach (var p in EFTHelpers._GameWorldHelper.AllOtherPlayer)
+            {
+                TryAddToSet(p);
+            }
+
+            return;
+
+            void TryAddToSet(Player player)
+            {
+                if (player == null)
+                {
+                    return;
+                }
+
+                if (!player.IsYourPlayer && !IsCorpPlayer(player))
+                {
+                    return;
+                }
+
+                if (!player.HealthController.IsAlive)
+                {
+                    return;
+                }
+                
+                centerPlayers.Add(player);
+            }
+        }
+
+        private static float GetDistance(Player bot, HashSet<Player> centerPlayers)
+        {
+            var minDistance = float.MaxValue;
+            foreach (var centerPlayer in centerPlayers)
+            {
+                minDistance = Mathf.Min(minDistance, (centerPlayer.PlayerBones.BodyTransform.position - bot.PlayerBones.BodyTransform.position).sqrMagnitude);
+            }
+
+            return minDistance;
         }
     }
 }
