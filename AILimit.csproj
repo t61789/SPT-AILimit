@@ -52,48 +52,32 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
   <PropertyGroup>
-    <PostBuildEvent>copy "$(TargetDir)dvize.AILimit.dll" "E:\Games\EscapeFromTarkov\3.10.4\Client.0.15.5.1.33420\BepInEx\plugins\dvize.AILimit.dll"</PostBuildEvent>
+    <PostBuildEvent>copy "$(TargetDir)dvize.AILimit.dll" "E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\BepInEx\plugins\dvize.AILimit.dll"</PostBuildEvent>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="0Harmony">
-      <HintPath>F:\Games\EscapeFromTarkov\3.10\Client.0.15.5.1.33420\BepInEx\core\0Harmony.dll</HintPath>
-    </Reference>
-    <Reference Include="0Harmony, Version=2.9.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>F:\SPT-AKI-DEV\BepInEx\core\0Harmony.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\BepInEx\core\0Harmony.dll</HintPath>
     </Reference>
     <Reference Include="Assembly-CSharp">
-      <HintPath>F:\Games\EscapeFromTarkov\3.10\Client.0.15.5.1.33420\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath>
-    </Reference>
-    <Reference Include="Assembly-CSharp, Version=0.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>F:\SPT-AKI-DEV\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\EscapeFromTarkov_Data\Managed\Assembly-CSharp.dll</HintPath>
     </Reference>
     <Reference Include="BepInEx">
-      <HintPath>F:\Games\EscapeFromTarkov\3.10\Client.0.15.5.1.33420\BepInEx\core\BepInEx.dll</HintPath>
-    </Reference>
-    <Reference Include="BepInEx, Version=5.4.21.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>F:\SPT-AKI-DEV\BepInEx\core\BepInEx.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\BepInEx\core\BepInEx.dll</HintPath>
     </Reference>
     <Reference Include="Comfort">
-      <HintPath>F:\Games\EscapeFromTarkov\3.10\Client.0.15.5.1.33420\EscapeFromTarkov_Data\Managed\Comfort.dll</HintPath>
-    </Reference>
-    <Reference Include="Comfort, Version=1.0.0.4, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>F:\SPT-AKI-DEV\EscapeFromTarkov_Data\Managed\Comfort.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\EscapeFromTarkov_Data\Managed\Comfort.dll</HintPath>
     </Reference>
     <Reference Include="EFTApi">
-      <HintPath>E:\Games\EscapeFromTarkov\3.10.4\Client.0.15.5.1.33420\BepInEx\plugins\kmyuhkyuk-EFTApi\EFTApi.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\BepInEx\plugins\kmyuhkyuk-EFTApi\EFTApi.dll</HintPath>
     </Reference>
     <Reference Include="EFTReflection">
-      <HintPath>E:\Games\EscapeFromTarkov\3.10.4\Client.0.15.5.1.33420\BepInEx\plugins\kmyuhkyuk-EFTApi\EFTReflection.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\BepInEx\plugins\kmyuhkyuk-EFTApi\EFTReflection.dll</HintPath>
     </Reference>
     <Reference Include="spt-common">
-      <HintPath>F:\Games\EscapeFromTarkov\3.10\Client.0.15.5.1.33420\BepInEx\plugins\spt\spt-common.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\BepInEx\plugins\spt\spt-common.dll</HintPath>
     </Reference>
     <Reference Include="spt-reflection">
-      <HintPath>F:\Games\EscapeFromTarkov\3.10\Client.0.15.5.1.33420\BepInEx\plugins\spt\spt-reflection.dll</HintPath>
+      <HintPath>E:\Games\EscapeFromTarkov\3.9.8\逃离塔科夫\游戏本体\Client.0.14.9.1.30626\BepInEx\plugins\spt\spt-reflection.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
